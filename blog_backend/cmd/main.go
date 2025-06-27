@@ -15,14 +15,14 @@ func main() {
 	}
 
 	// Initialize the application
-	appInstance, err := app.NewApp()
+	appInstance, err := app.NewApp(cfg)
 	if err != nil {
 		fmt.Printf("Error initializing app: %v\n", err)
 		return
 	}
 
 	// Run the application
-	if err := appInstance.Run(cfg.Server.Address); err != nil {
+	if err := appInstance.Run(cfg.ServerPort); err != nil {
 		fmt.Printf("Error running app: %v\n", err)
 	}
 }
