@@ -8,6 +8,7 @@ import (
 
 type UserRepository interface {
 	CreateUser(user *models.User) (*models.User, error)
+	RetriveUser(user *models.User) (*models.User, error)
 }
 
 type userRepositoryGorm struct {
@@ -16,6 +17,13 @@ type userRepositoryGorm struct {
 
 func (r *userRepositoryGorm) CreateUser(user *models.User) (*models.User, error) {
 	if err := r.db.Create(user).Error; err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (r *userRepositoryGorm) RetriveUser(user *models.User) (*models.User, error) {
+	if err := r.db.First(user).Error; err != nil {
 		return nil, err
 	}
 	return user, nil

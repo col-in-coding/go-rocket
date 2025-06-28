@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"blog_backend/app/config"
 	"blog_backend/app/dto"
 	"blog_backend/app/services"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 )
 
 type AuthController struct {
+	cfg         *config.Config
 	authService services.AuthService
 }
 
@@ -38,10 +40,24 @@ func (a AuthController) Register(ctx *gin.Context) {
 }
 
 func (a AuthController) Login(ctx *gin.Context) {
+	request := &dto.LoginRequest{}
+	if err := ctx.ShouldBind(request); err != nil {
+		ctx.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
 
+	_, token, err := a.authService.Login(request.Email, request.Password)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	fmt.Println(token)
+
+	resp := dto.LoginPesponse{Message: "Login Success", Token: token}
+	ctx.JSON(200, resp)
 }
 
-func NewAuthController(authservice services.AuthService) *AuthController {
+func NewAuthController(cfg *config.Config, authservice services.AuthService) *AuthController {
 	return &AuthController{
 		authService: authservice,
 	}

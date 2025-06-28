@@ -13,6 +13,8 @@ import (
 )
 
 type App struct {
+	cfg *config.Config
+
 	router *gin.Engine
 
 	authController *controller.AuthController
@@ -30,15 +32,16 @@ func NewApp(cfg *config.Config) (*App, error) {
 
 	// Set up Repositories and Services
 	userRepo := repository.NewUserRepository(db)
-	authService := services.NewAuthService(userRepo)
+	authService := services.NewAuthService(cfg, userRepo)
 
 	// Initialize Controllers
-	authController := controller.NewAuthController(authService)
+	authController := controller.NewAuthController(cfg, authService)
 
 	// Set up routes
-	routes.SetupRoutes(router, authController)
+	routes.SetupRoutes(cfg, router, authController)
 
 	return &App{
+		cfg:            cfg,
 		router:         router,
 		authController: authController,
 	}, nil
