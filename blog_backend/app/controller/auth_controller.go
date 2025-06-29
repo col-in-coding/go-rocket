@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"blog_backend/app/config"
 	"blog_backend/app/dto"
 	"blog_backend/app/services"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 )
 
 type AuthController struct {
-	cfg         *config.Config
 	authService services.AuthService
 }
 
@@ -57,7 +55,7 @@ func (a AuthController) Login(ctx *gin.Context) {
 	ctx.JSON(200, resp)
 }
 
-func NewAuthController(cfg *config.Config, authservice services.AuthService) *AuthController {
+func NewAuthController(authservice services.AuthService) *AuthController {
 	return &AuthController{
 		authService: authservice,
 	}

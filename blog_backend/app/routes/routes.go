@@ -8,7 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRoutes(cfg *config.Config, router *gin.Engine, authController *controller.AuthController) {
+func SetupRoutes(cfg *config.Config, router *gin.Engine,
+	authController *controller.AuthController,
+	postController *controller.PostController,
+	commentController *controller.CommentController) {
 	// Define your routes here
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(200, gin.H{
@@ -40,28 +43,22 @@ func SetupRoutes(cfg *config.Config, router *gin.Engine, authController *control
 	// Post routes get post is public, create post is protected
 	postRouter := router.Group("/post")
 	{
-		postRouter.GET("/", func(c *gin.Context) {
-			// Logic to retrieve posts
-			c.JSON(200, gin.H{"message": "List of posts"})
-		})
+		postRouter.GET("/:post_id", postController.RetrievePost)
 		// Create post route is protected
-		postRouter.POST("/", authMiddleWare(cfg.JWTSecret), func(c *gin.Context) {
-			// Logic to create a post
-			userId, exists := c.Get("userId")
-			if !exists {
-				c.JSON(401, gin.H{"error": "Unauthorized"})
-				return
-			}
+		postRouter.Use(authMiddleWare(cfg.JWTSecret))
+		postRouter.POST("/", postController.CreatePost)
+		postRouter.PUT("/:post_id", postController.UpdatePost)
+		postRouter.DELETE("/:post_id", postController.DeletePost)
+	}
 
-			// Here you would typically bind the request body to a struct
-			// and save the post to the database.
-			// For simplicity, we will just return a success message.
-
-			c.JSON(200, gin.H{
-				"message": "Post created successfully",
-				"userId":  userId,
-			})
-		})
+	commentRouter := router.Group("/comment")
+	{
+		commentRouter.GET("/:comment_id", commentController.RetrieveComment)
+		commentRouter.GET("/post/:post_id", commentController.ListComments)
+		commentRouter.Use(authMiddleWare(cfg.JWTSecret))
+		commentRouter.PUT("/:comment_id", commentController.UpdateComment)
+		commentRouter.POST("/", commentController.CreateComment)
+		commentRouter.DELETE("/:comment_id", commentController.DeleteComment)
 	}
 
 }

@@ -17,7 +17,9 @@ type App struct {
 
 	router *gin.Engine
 
-	authController *controller.AuthController
+	authController    *controller.AuthController
+	postController    *controller.PostController
+	commentController *controller.CommentController
 }
 
 func NewApp(cfg *config.Config) (*App, error) {
@@ -32,18 +34,27 @@ func NewApp(cfg *config.Config) (*App, error) {
 
 	// Set up Repositories and Services
 	userRepo := repository.NewUserRepository(db)
+	postRepo := repository.NewPostRepository(db)
+	commentRepo := repository.NewCommentRepository(db)
+
 	authService := services.NewAuthService(cfg, userRepo)
+	postService := services.NewPostService(postRepo)
+	commentService := services.NewCommentService(commentRepo)
 
 	// Initialize Controllers
-	authController := controller.NewAuthController(cfg, authService)
+	authController := controller.NewAuthController(authService)
+	postController := controller.NewPostController(postService)
+	commentController := controller.NewCommentController(commentService)
 
 	// Set up routes
-	routes.SetupRoutes(cfg, router, authController)
+	routes.SetupRoutes(cfg, router, authController, postController, commentController)
 
 	return &App{
-		cfg:            cfg,
-		router:         router,
-		authController: authController,
+		cfg:               cfg,
+		router:            router,
+		authController:    authController,
+		postController:    postController,
+		commentController: commentController,
 	}, nil
 }
 

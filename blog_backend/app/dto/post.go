@@ -6,22 +6,17 @@ type PostCreateRequest struct {
 }
 
 type PostCreateResponse struct {
-	Message string `json:"message"`
-	PostID  int    `json:"post_id"`
-	UserID  int    `json:"user_id"`
+	Message  string   `json:"message"`
+	PostItem PostItem `json:"post_item"`
 }
 
-type PostGetRequest struct {
+type PostRetrieveRequest struct {
 	PostID int `uri:"post_id" binding:"required"`
 }
 
-type PostGetResponse struct {
-	PostID    int    `json:"post_id"`
-	Title     string `json:"title"`
-	Content   string `json:"content"`
-	UserID    int    `json:"user_id"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+type PostRetrieveResponse struct {
+	Message  string   `json:"message"`
+	PostItem PostItem `json:"post_item"`
 }
 
 type PostUpdateRequest struct {
@@ -31,9 +26,8 @@ type PostUpdateRequest struct {
 }
 
 type PostUpdateResponse struct {
-	Message string `json:"message"`
-	PostID  int    `json:"post_id"`
-	UserID  int    `json:"user_id"`
+	Message  string   `json:"message"`
+	PostItem PostItem `json:"post_item"`
 }
 
 type PostDeleteRequest struct {
@@ -42,4 +36,13 @@ type PostDeleteRequest struct {
 
 type PostDeleteResponse struct {
 	Message string `json:"message"`
+}
+
+type PostItem struct {
+	PostID    int    `json:"post_id"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
+	UserID    int    `json:"user_id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
