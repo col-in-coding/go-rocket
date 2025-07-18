@@ -1,0 +1,9 @@
+node_modules
+*.log
+artifacts
+cache
+*.sol.js
+coverage
+dist
+build
+*.env
