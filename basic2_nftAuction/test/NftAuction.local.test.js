@@ -9,14 +9,18 @@ const {
 describe("NftAuction Test", () => {
     let myERC20, myNftToken, nftAuctionProxy;
     let mockEthPriceFeed, mockMercPriceFeed;
-    let tokenId, nftAddress, admin, signer, bidder1, bidder2;
+    // admin：部署合约的账户
+    // nftOwner：NFT的所有者
+    // bidder1、bidder2：参与拍卖的竞标者
+    let admin, nftOwner, bidder1, bidder2;
+    let tokenId, nftAddress;
 
     async function deployTestContracts() {
 
         // 1. Deploy the MyNftToken contract and mint an NFT
         myNftToken = await ethers.deployContract("MyNftToken", [admin.address]);
         await myNftToken.waitForDeployment();
-        const tx = await myNftToken.mint(signer.address);
+        const tx = await myNftToken.mint(nftOwner.address);
         tokenId = await getTokenId(tx, myNftToken);
 
         // 2. Deploy the MyERC20 contract
@@ -26,19 +30,17 @@ describe("NftAuction Test", () => {
         // 3. Deploy the NftAuction contract using the beacon proxy
         await deployments.fixture("DeployNftAuctionBeacon");
         const nftAuctionBeacon = await deployments.get("NftAuctionBeacon");
-        // 使用 signer 部署合约
-        const NftAuction = await ethers.getContractFactory('NftAuction', signer);
+        // 使用 admin 部署合约
+        const NftAuction = await ethers.getContractFactory('NftAuction', admin);
         nftAuctionProxy = await upgrades.deployBeaconProxy(
             nftAuctionBeacon.address,
             NftAuction,
-            [],
-            { initializer: 'initialize', from: signer.address }
+            [nftOwner.address], // 传递 seller 参数
+            { initializer: 'initialize', from: admin.address }
         );
         await nftAuctionProxy.waitForDeployment();
 
         nftAddress = await myNftToken.getAddress();
-
-        return { myNftToken, nftAuctionProxy, tokenId };
     }
 
     async function deployMockPriceFeedFixture() {
@@ -53,7 +55,7 @@ describe("NftAuction Test", () => {
     }
 
     beforeEach(async () => {
-        [admin, signer, bidder1, bidder2] = await ethers.getSigners();
+        [admin, nftOwner, bidder1, bidder2] = await ethers.getSigners();
         await loadFixture(deployTestContracts);
         await loadFixture(deployMockPriceFeedFixture);
         // 设置价格喂价器
@@ -70,12 +72,12 @@ describe("NftAuction Test", () => {
 
     it("should be allow user to deposit NFT", async function () {
 
-        expect(await myNftToken.ownerOf(tokenId)).to.equal(signer.address);
+        expect(await myNftToken.ownerOf(tokenId)).to.equal(nftOwner.address);
 
         // ethers v6 合约实例没有直接的.address属性
-        const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-        await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-        await nftAuctionProxy.connect(signer).depositNft(
+        const nftAuctionProxyAddress = nftAuctionProxy.target;
+        await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+        await nftAuctionProxy.connect(admin).depositNft(
             tokenId,
             10 * 1000,
             nftAddress,
@@ -83,7 +85,8 @@ describe("NftAuction Test", () => {
         );
         console.log("NftAuction Proxy deployed at:", nftAuctionProxy.target);
 
-        expect(await nftAuctionProxy.seller()).to.equal(signer.address);
+        expect(await nftAuctionProxy.version()).to.equal("1.0.0");
+        expect(await nftAuctionProxy.seller()).to.equal(nftOwner.address);
         expect(await nftAuctionProxy.nftAddress()).to.equal(nftAddress);
         expect(await nftAuctionProxy.tokenId()).to.equal(tokenId);
         // the owner of the NFT should be proxy
@@ -96,8 +99,8 @@ describe("NftAuction Test", () => {
         const bidPrice = 0.02;
 
         const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-        await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-        await nftAuctionProxy.connect(signer).depositNft(
+        await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+        await nftAuctionProxy.connect(admin).depositNft(
             tokenId,
             10 * 1000,
             nftAddress,
@@ -130,7 +133,7 @@ describe("NftAuction Test", () => {
         expect(await nftAuctionProxy.highestBidder()).to.equal(bidder1.address);
         expect(await nftAuctionProxy.highestBid()).to.equal(ethAmount2);
 
-        await nftAuctionProxy.connect(signer).endAuction();
+        await nftAuctionProxy.connect(admin).endAuction();
         expect(await myNftToken.ownerOf(tokenId)).to.equal(bidder1.address);
 
     });
@@ -140,8 +143,8 @@ describe("NftAuction Test", () => {
 
         // End the Auction without any bids
         const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-        await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-        await nftAuctionProxy.connect(signer).depositNft(
+        await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+        await nftAuctionProxy.connect(admin).depositNft(
             tokenId,
             10 * 1000,
             nftAddress,
@@ -149,8 +152,8 @@ describe("NftAuction Test", () => {
         );
 
         // End the auction
-        await nftAuctionProxy.connect(signer).endAuction();
-        expect(await myNftToken.ownerOf(tokenId)).to.equal(signer.address);
+        await nftAuctionProxy.connect(admin).endAuction();
+        expect(await myNftToken.ownerOf(tokenId)).to.equal(nftOwner.address);
     });
 
     it("should allow user to withdraw NFT after auction ends (end by ERC20)", async function () {
@@ -158,8 +161,8 @@ describe("NftAuction Test", () => {
 
         // End the Auction without any bids
         const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-        await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-        await nftAuctionProxy.connect(signer).depositNft(
+        await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+        await nftAuctionProxy.connect(admin).depositNft(
             tokenId,
             10 * 1000,
             nftAddress,
@@ -174,18 +177,22 @@ describe("NftAuction Test", () => {
         expect(await nftAuctionProxy.highestBidder()).to.equal(bidder1.address);
         expect(await nftAuctionProxy.highestBid()).to.equal(bidMercPrice);
 
-        await nftAuctionProxy.connect(signer).endAuction();
+        await nftAuctionProxy.connect(admin).endAuction();
         expect(await myNftToken.ownerOf(tokenId)).to.equal(bidder1.address);
         expect(await myERC20.balanceOf(bidder1.address)).to.equal(0);
-        expect(await myERC20.balanceOf(signer.address)).to.equal(bidMercPrice);
+        expect(await myERC20.balanceOf(nftOwner.address)).to.equal(bidMercPrice);
+
+        await expect(
+            nftAuctionProxy.connect(nftOwner).endAuction()
+        ).to.be.revertedWith("Auction already ended");
     });
 
     describe("Error Tests", () => {
         it("should revert if initialize is called again", async function () {
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress
                 , true);
-            await nftAuctionProxy.connect(signer).depositNft(
+            await nftAuctionProxy.connect(admin).depositNft(
                 tokenId,
                 10 * 1000,
                 nftAddress,
@@ -193,15 +200,15 @@ describe("NftAuction Test", () => {
             );
             // 尝试再次调用 initialize，应该会失败
             await expect(
-                nftAuctionProxy.connect(signer).initialize()
+                nftAuctionProxy.connect(admin).initialize(nftOwner)
             ).to.be.revertedWithCustomError(nftAuctionProxy, "InvalidInitialization");
         });
 
         it("should revert if double deposit NFT", async function () {
             // ethers v6 合约实例没有直接的.address属性
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-            await nftAuctionProxy.connect(signer).depositNft(
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+            await nftAuctionProxy.connect(admin).depositNft(
                 tokenId,
                 10 * 1000,
                 nftAddress,
@@ -211,7 +218,7 @@ describe("NftAuction Test", () => {
             // 再次尝试存入同一个 NFT，应该会失败
             // 在测试中断言交易 revert 时，不应先使用 await 得到结果再用 expect 检查，而应将返回的交易 Promise 直接传入 expect。
             await expect(
-                nftAuctionProxy.connect(signer).depositNft(
+                nftAuctionProxy.connect(admin).depositNft(
                     tokenId,
                     10 * 1000,
                     nftAddress,
@@ -231,15 +238,15 @@ describe("NftAuction Test", () => {
                     nftAddress,
                     ethers.parseEther("0.01")
                 )
-            ).to.be.revertedWith("Only seller can deposit NFT.");
+            ).to.be.revertedWith("Only admin can deposit NFT.");
         });
 
-        it("should revert if nft address is zero", async function() {
+        it("should revert if nft address is zero", async function () {
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
 
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
             await expect(
-                nftAuctionProxy.connect(signer).depositNft(
+                nftAuctionProxy.connect(admin).depositNft(
                     tokenId,
                     10 * 1000,
                     ethers.ZeroAddress,
@@ -251,12 +258,12 @@ describe("NftAuction Test", () => {
         it("should revert if the price feed address is not set when get price", async function () {
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
 
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-            await nftAuctionProxy.connect(signer).depositNft(
-                    tokenId,
-                    10 * 1000,
-                    nftAddress,
-                    ethers.parseEther("0.01")
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+            await nftAuctionProxy.connect(admin).depositNft(
+                tokenId,
+                10 * 1000,
+                nftAddress,
+                ethers.parseEther("0.01")
             );
             const mockTokenAddress = "0xB0C712f98daE15264c8E26132BCC91C40aD4d5F9";
             await expect(
@@ -266,8 +273,8 @@ describe("NftAuction Test", () => {
 
         it("should revert if bid after auction ended", async function () {
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-            await nftAuctionProxy.connect(signer).depositNft(
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+            await nftAuctionProxy.connect(admin).depositNft(
                 tokenId,
                 1,
                 nftAddress,
@@ -289,9 +296,8 @@ describe("NftAuction Test", () => {
 
         it("should revert if bid amount is not sufficient", async function () {
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress
-                , true);
-            await nftAuctionProxy.connect(signer).depositNft(
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+            await nftAuctionProxy.connect(admin).depositNft(
                 tokenId,
                 10 * 1000,
                 nftAddress,
@@ -305,8 +311,8 @@ describe("NftAuction Test", () => {
 
         it("should revert if end auction by non-seller", async function () {
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-            await nftAuctionProxy.connect(signer).depositNft(
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+            await nftAuctionProxy.connect(admin).depositNft(
                 tokenId,
                 10 * 1000,
                 nftAddress,
@@ -316,7 +322,22 @@ describe("NftAuction Test", () => {
             // 尝试其他人结束拍卖，应该会失败
             await expect(
                 nftAuctionProxy.connect(bidder1).endAuction()
-            ).to.be.revertedWith("Only seller can end the auction");
+            ).to.be.revertedWith("Only seller or admin can end the auction");
+        });
+
+        it("should allow admin to end auction", async function () {
+            const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+            await nftAuctionProxy.connect(admin).depositNft(
+                tokenId,
+                10 * 1000,
+                nftAddress,
+                ethers.parseEther("0.01")
+            );
+
+            // Admin（nftOwner）应该能够结束拍卖
+            await nftAuctionProxy.connect(admin).endAuction();
+            expect(await myNftToken.ownerOf(tokenId)).to.equal(nftOwner.address);
         });
     });
 
@@ -324,8 +345,9 @@ describe("NftAuction Test", () => {
         it("should upgrade the NftAuction contract", async function () {
             // 升级前
             const nftAuctionProxyAddress = await nftAuctionProxy.getAddress();
-            await myNftToken.connect(signer).setApprovalForAll(nftAuctionProxyAddress, true);
-            await nftAuctionProxy.connect(signer).depositNft(
+            await myNftToken.connect(nftOwner).setApprovalForAll(nftAuctionProxyAddress, true);
+            await nftAuctionProxy.connect(admin).depositNft(
+
                 tokenId,
                 10 * 1000,
                 nftAddress,
@@ -341,13 +363,13 @@ describe("NftAuction Test", () => {
             await upgrades.upgradeBeacon(
                 nftAuctionBeacon.address,
                 NftAuctionV2,
-                {from: admin.address}
+                { from: admin.address }
             );
 
             // 验证升级后的合约版本
             const upgraded = NftAuctionV2.attach(await nftAuctionProxy.getAddress());
             expect(await upgraded.version()).to.equal("2.0.0");
-            expect(await upgraded.seller()).to.equal(signer.address);
+            expect(await upgraded.seller()).to.equal(nftOwner.address);
         });
     });
 });

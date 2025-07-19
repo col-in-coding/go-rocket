@@ -66,7 +66,6 @@ async function getTokenId(tx, myNftToken) {
             const parsed = iface.parseLog(log);
             if (parsed.name === "Minted") {
             tokenId = parsed.args.tokenId;
-            console.log("✅ Minted tokenId:", tokenId.toString());
             break;
             }
         } catch (e) {
@@ -75,6 +74,5 @@ async function getTokenId(tx, myNftToken) {
             continue;
         }
     }
-    console.log("Minted tokenId:", tokenId.toString());
     return tokenId;
 }

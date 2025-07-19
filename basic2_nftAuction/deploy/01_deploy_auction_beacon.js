@@ -11,10 +11,10 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
     });
     await beacon.waitForDeployment();
     const beaconAddress = await beacon.getAddress();
-    console.log("NftAuction Beacon deployed at:", beaconAddress);
+    console.log("NftAuction Beacon Upgradable Contract deployed at:", beaconAddress);
 
     const implAddress = await beacon.implementation();
-    console.log("Current implementation address is:", implAddress);
+    console.log("NftAuction implementation (Logic Contract) deployed at:", implAddress);
 
     const NftAuctionBeacon = {
         address: beaconAddress,

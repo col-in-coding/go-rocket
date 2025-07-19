@@ -11,7 +11,8 @@ import "hardhat/console.sol";
 contract NftAuction is Initializable, ERC721Holder {
     using SafeERC20 for IERC20;
 
-    address public seller;
+    address public admin;  // 管理员（通常是工厂合约）
+    address public seller; // 卖家（拍卖物品的所有者）
     address public highestBidder;
     address public nftAddress;
     // Token for bidding (if needed)
@@ -29,8 +30,9 @@ contract NftAuction is Initializable, ERC721Holder {
 
     mapping(address => AggregatorV3Interface) public priceFeeds;
 
-    function initialize() public initializer {
-        seller = msg.sender;
+    function initialize(address _seller) public initializer {
+        admin = msg.sender;  // 初始化时，调用者（工厂合约）是管理员
+        seller = _seller;    // 同时设置卖家
     }
 
     function version() public pure virtual returns (string memory) {
@@ -50,20 +52,20 @@ contract NftAuction is Initializable, ERC721Holder {
         address _nftAddress,
         uint256 _startPrice
     ) external {
-        require(msg.sender == seller, "Only seller can deposit NFT.");
+        require(msg.sender == admin, "Only admin can deposit NFT.");
         require(!deposited, "NFT already deposited");
         require(_nftAddress != address(0), "NFT address cannot be 0.");
 
+        tokenId = _tokenId;
         duration = _duration;
         startPrice = _startPrice;
         startTime = block.timestamp;
         nftAddress = _nftAddress;
-        tokenId = _tokenId;
         deposited = true;
 
         // * 需要先给代理合约地址授权 *
-        // 外部调用合约的 `safeTransferFrom` 方法来转移 NFT
-        IERC721(nftAddress).safeTransferFrom(msg.sender, address(this), tokenId);
+        // 外部调用合约的 `safeTransferFrom` 方法从 seller 转移 NFT
+        IERC721(nftAddress).safeTransferFrom(seller, address(this), tokenId);
     }
 
     function setPriceFeed(address _tokenAddress, address _priceFeed) public {
@@ -128,13 +130,15 @@ contract NftAuction is Initializable, ERC721Holder {
 
     function endAuction() external virtual {
         require(
-            seller == msg.sender,
-            "Only seller can end the auction"
+            seller == msg.sender || admin == msg.sender,
+            "Only seller or admin can end the auction"
         );
         require(!ended, "Auction already ended");
 
         ended = true;
 
+        // 只有在存入了NFT的情况下才进行转移操作
+        if (!deposited) return;
         if (highestBidder != address(0)) {
             IERC721(nftAddress).safeTransferFrom(address(this), highestBidder, tokenId);
             if (tokenAddress == address(0)) {
@@ -145,5 +149,6 @@ contract NftAuction is Initializable, ERC721Holder {
         } else {
             IERC721(nftAddress).safeTransferFrom(address(this), seller, tokenId);
         }
+
     }
 }
