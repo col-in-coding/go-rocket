@@ -4,6 +4,7 @@ const { expect } = require("chai");
 const {
     loadFixture,
 } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
+const { getTokenId } = require("./helpers/testHelpers");
 
 
 describe("NftAuction Test", () => {
@@ -177,6 +178,7 @@ describe("NftAuction Test", () => {
             nftAddress,
             ethers.parseEther(startPrice.toString())
         );
+        const feeRate = await nftAuctionProxy.feeRate();
 
         // Bid by MERC
         const bidMercPrice = ethers.parseUnits((0.02 * 2000).toString(), 18);
@@ -189,7 +191,9 @@ describe("NftAuction Test", () => {
         await nftAuctionProxy.connect(deployer).endAuction();
         expect(await myNftToken.ownerOf(tokenId)).to.equal(bidder1.address);
         expect(await myERC20.balanceOf(bidder1.address)).to.equal(0);
-        expect(await myERC20.balanceOf(nftOwner.address)).to.equal(bidMercPrice);
+
+        const nftOwnerBalance = bidMercPrice * (BigInt(10000) - BigInt(feeRate)) / BigInt(10000);
+        expect(await myERC20.balanceOf(nftOwner.address)).to.equal(nftOwnerBalance);
 
         await expect(
             nftAuctionProxy.connect(nftOwner).endAuction()
@@ -380,26 +384,3 @@ describe("NftAuction Test", () => {
     });
 });
 
-async function getTokenId(tx, myNftToken) {
-    let tokenId;
-    const receipt = await tx.wait();
-    // console.log("Minted NFT transaction receipt:", receipt);
-    const logs = receipt.logs;
-    const iface = myNftToken.interface;
-
-    for (const log of logs) {
-        try {
-            const parsed = iface.parseLog(log);
-            if (parsed.name === "Minted") {
-                tokenId = parsed.args.tokenId;
-                break;
-            }
-        } catch (e) {
-            // 不是本合约的日志，忽略
-            console.log("❌ Ignored log:", log);
-            continue;
-        }
-    }
-    console.log("Minted tokenId:", tokenId.toString());
-    return tokenId;
-}

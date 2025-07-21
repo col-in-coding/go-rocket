@@ -24,19 +24,68 @@ contract NftAuction is Initializable, ERC721Holder {
     uint256 public startTime;
     uint256 public tokenId;
     uint256 public highestBid;
+    uint256 public feeRate; // 手续费率 (basis points, 例如 250 = 2.5%)
 
     bool public deposited;
     bool public ended;
 
     mapping(address => AggregatorV3Interface) public priceFeeds;
 
+    // 事件
+    event FeeCollected(address indexed tokenAddress, uint256 feeAmount, address indexed collector);
+    event AuctionCompleted(address indexed winner, uint256 amount, uint256 fee);
+
     function initialize(address _seller) public initializer {
         admin = msg.sender;  // 初始化时，调用者（工厂合约）是管理员
         seller = _seller;    // 同时设置卖家
+        feeRate = 250;       // 默认手续费率 2.5% (250 basis points)
     }
 
     function version() public pure virtual returns (string memory) {
         return "1.0.0";
+    }
+
+    /**
+     * @dev 设置手续费率
+     * @param _feeRate 手续费率（基点，10000 = 100%）
+     */
+    function setFeeRate(uint256 _feeRate) external {
+        require(msg.sender == admin, "Only admin can set fee rate");
+        require(_feeRate <= 1000, "Fee rate cannot exceed 10%"); // 最大10%
+        feeRate = _feeRate;
+    }
+
+    /**
+     * @dev 获取当前手续费率
+     */
+    function getFeeRate() external view returns (uint256) {
+        return feeRate;
+    }
+
+    /**
+     * @dev 提取合约中的ETH余额（仅管理员）
+     * @param _to 接收ETH的地址
+     */
+    function withdrawETH(address _to) external {
+        require(msg.sender == admin, "Only admin can withdraw");
+        require(_to != address(0), "Invalid recipient address");
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No ETH to withdraw");
+        payable(_to).transfer(balance);
+    }
+
+    /**
+     * @dev 提取合约中的ERC20代币余额（仅管理员）
+     * @param _tokenAddress ERC20代币地址
+     * @param _to 接收代币的地址
+     */
+    function withdrawERC20(address _tokenAddress, address _to) external {
+        require(msg.sender == admin, "Only admin can withdraw");
+        require(_to != address(0), "Invalid recipient address");
+        IERC20 token = IERC20(_tokenAddress);
+        uint256 balance = token.balanceOf(address(this));
+        require(balance > 0, "No tokens to withdraw");
+        token.safeTransfer(_to, balance);
     }
 
     /**
@@ -139,16 +188,30 @@ contract NftAuction is Initializable, ERC721Holder {
 
         // 只有在存入了NFT的情况下才进行转移操作
         if (!deposited) return;
+
         if (highestBidder != address(0)) {
+            // 转移NFT给最高竞价者
             IERC721(nftAddress).safeTransferFrom(address(this), highestBidder, tokenId);
+
+            // 计算手续费和卖家收益
+            uint256 feeAmount = (highestBid * feeRate) / 10000;
+            uint256 sellerAmount = highestBid - feeAmount;
+
             if (tokenAddress == address(0)) {
-                payable(seller).transfer(highestBid);
+                // ETH 转账 - 只给卖家转账，手续费保留在合约中
+                payable(seller).transfer(sellerAmount);
             } else {
-                IERC20(tokenAddress).safeTransfer(seller, highestBid);
+                // ERC20 转账 - 只给卖家转账，手续费保留在合约中
+                IERC20(tokenAddress).safeTransfer(seller, sellerAmount);
             }
+
+            // 发送事件
+            emit FeeCollected(tokenAddress, feeAmount, admin);
+            emit AuctionCompleted(highestBidder, highestBid, feeAmount);
         } else {
+            // 没有竞价者，NFT返还给卖家
             IERC721(nftAddress).safeTransferFrom(address(this), seller, tokenId);
         }
-
     }
+
 }

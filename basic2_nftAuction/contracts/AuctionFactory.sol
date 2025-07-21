@@ -5,9 +5,13 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./NftAuction.sol";
+import "./interfaces/INftAuction.sol";
 
 contract AuctionFactory is Initializable, UUPSUpgradeable {
+    using SafeERC20 for IERC20;
 
     address public admin;
 
@@ -58,6 +62,12 @@ contract AuctionFactory is Initializable, UUPSUpgradeable {
         return auctionIds.length;
     }
 
+    function getAuctionFeeRate(uint256 _auctionId) external view returns (uint256) {
+        require(_auctionId < nextAuctionId, "Auction does not exist.");
+        INftAuction auctionContract = INftAuction(auctionAddresses[_auctionId]);
+        return auctionContract.feeRate();
+    }
+
     function depositNft(
         uint256 _auctionId,
         uint256 _tokenId,
@@ -67,7 +77,7 @@ contract AuctionFactory is Initializable, UUPSUpgradeable {
     ) external virtual {
         require(_auctionId < nextAuctionId, "Auction does not exist.");
 
-        NftAuction auctionContract = NftAuction(auctionAddresses[_auctionId]);
+        INftAuction auctionContract = INftAuction(auctionAddresses[_auctionId]);
 
         require(
             msg.sender == auctionContract.seller() || msg.sender == admin,
@@ -80,9 +90,84 @@ contract AuctionFactory is Initializable, UUPSUpgradeable {
     function endAuction(uint256 _auctionId) external virtual onlyAdmin {
         require(_auctionId < nextAuctionId, "Auction does not exist.");
 
-        NftAuction auctionContract = NftAuction(auctionAddresses[_auctionId]);
+        INftAuction auctionContract = INftAuction(auctionAddresses[_auctionId]);
         auctionContract.endAuction();
         emit AuctionEnded(_auctionId, address(auctionContract));
+    }
+
+    /**
+     * @dev 设置特定拍卖的手续费率
+     * @param _auctionId 拍卖ID
+     * @param _feeRate 手续费率（基点）
+     */
+    function setAuctionFeeRate(uint256 _auctionId, uint256 _feeRate) external virtual onlyAdmin {
+        require(_auctionId < nextAuctionId, "Auction does not exist.");
+
+        INftAuction auctionContract = INftAuction(auctionAddresses[_auctionId]);
+        auctionContract.setFeeRate(_feeRate);
+    }
+
+    /**
+     * @dev 批量设置所有拍卖的手续费率
+     * @param _feeRate 手续费率（基点）
+     */
+    function setGlobalFeeRate(uint256 _feeRate) external virtual onlyAdmin {
+        for (uint256 i = 0; i < nextAuctionId; i++) {
+            INftAuction auctionContract = INftAuction(auctionAddresses[i]);
+            auctionContract.setFeeRate(_feeRate);
+        }
+    }
+
+    /**
+     * @dev 从指定拍卖合约提取ETH手续费
+     * @param _auctionId 拍卖ID
+     */
+    function withdrawFeeFromAuction(uint256 _auctionId) external onlyAdmin {
+        require(_auctionId < nextAuctionId, "Auction does not exist.");
+        INftAuction auctionContract = INftAuction(auctionAddresses[_auctionId]);
+        auctionContract.withdrawETH(admin);
+    }
+
+    /**
+     * @dev 从指定拍卖合约提取ERC20手续费
+     * @param _auctionId 拍卖ID
+     * @param tokenAddress ERC20代币地址
+     */
+    function withdrawERC20FeeFromAuction(uint256 _auctionId, address tokenAddress) external onlyAdmin {
+        require(_auctionId < nextAuctionId, "Auction does not exist.");
+        INftAuction auctionContract = INftAuction(auctionAddresses[_auctionId]);
+        auctionContract.withdrawERC20(tokenAddress, admin);
+    }
+
+    /**
+     * @dev 从所有拍卖合约批量提取ETH手续费
+     */
+    function withdrawAllETHFees() external onlyAdmin {
+        for (uint256 i = 0; i < nextAuctionId; i++) {
+            INftAuction auctionContract = INftAuction(auctionAddresses[i]);
+            try auctionContract.withdrawETH(admin) {
+                // 成功提取
+            } catch {
+                // 忽略失败的提取（可能是余额为0）
+                console.log("Failed to withdraw ETH from auction %d", i);
+            }
+        }
+    }
+
+    /**
+     * @dev 从所有拍卖合约批量提取ERC20手续费
+     * @param tokenAddress ERC20代币地址
+     */
+    function withdrawAllERC20Fees(address tokenAddress) external onlyAdmin {
+        for (uint256 i = 0; i < nextAuctionId; i++) {
+            INftAuction auctionContract = INftAuction(auctionAddresses[i]);
+            try auctionContract.withdrawERC20(tokenAddress, admin) {
+                // 成功提取
+            } catch {
+                // 忽略失败的提取（可能是余额为0）
+                console.log("Failed to withdraw ERC20 from auction %d", i);
+            }
+        }
     }
 
     /**
@@ -102,17 +187,6 @@ contract AuctionFactory is Initializable, UUPSUpgradeable {
      */
     function getCurrentImplementation() external view virtual returns (address) {
         return auctionBeacon.implementation();
-    }
-
-    /**
-     * @dev 获取所有拍卖合约的当前版本
-     */
-    function getAllAuctionsVersion() external view returns (string memory) {
-        if (auctionIds.length == 0) return "No auctions created";
-
-        // 获取第一个拍卖合约的版本（所有代理合约版本相同）
-        NftAuction auctionContract = NftAuction(auctionAddresses[auctionIds[0]]);
-        return auctionContract.version();
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyAdmin {}

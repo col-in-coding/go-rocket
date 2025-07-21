@@ -4,6 +4,7 @@ const { expect } = require("chai");
 const {
     loadFixture,
 } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
+const { getTokenId } = require("./helpers/testHelpers");
 
 describe("NFT Auction Integration Test (Factory + Auction)", () => {
     let myERC20, myNftToken, auctionFactory;
@@ -193,11 +194,13 @@ describe("NFT Auction Integration Test (Factory + Auction)", () => {
 
             // 结束拍卖
             await auctionFactory.connect(admin).endAuction(auctionId);
+            const feeRate = await auctionFactory.getAuctionFeeRate(auctionId);
+            const expectedFee = (bidMercPrice * feeRate) / 10000n; // 2.5% fee
 
             // 验证 NFT 转移和资金转移
             expect(await myNftToken.ownerOf(tokenId)).to.equal(bidder1.address);
             expect(await myERC20.balanceOf(bidder1.address)).to.equal(0);
-            expect(await myERC20.balanceOf(nftOwner.address)).to.equal(bidMercPrice);
+            expect(await myERC20.balanceOf(nftOwner.address)).to.equal(bidMercPrice - expectedFee);
         });
 
         it("should handle auction with multiple bids", async function () {
@@ -270,6 +273,7 @@ describe("NFT Auction Integration Test (Factory + Auction)", () => {
             expect(await auctionContract.ended()).to.be.true;
             expect(await auctionContract.deposited()).to.be.false;
         });
+
     });
 
     describe("Error Handling", () => {
@@ -346,6 +350,295 @@ describe("NFT Auction Integration Test (Factory + Auction)", () => {
             await expect(
                 auctionFactory.connect(admin).endAuction(auctionId)
             ).to.be.revertedWith("Auction already ended");
+        });
+    });
+
+    describe("Fee Withdrawal Tests", () => {
+        let auctionContract, auctionId, auctionAddress;
+
+        beforeEach(async () => {
+            // 创建拍卖
+            await auctionFactory.connect(nftOwner).createAuction(nftOwner.address);
+            auctionId = 0;
+            auctionAddress = await auctionFactory.auctionAddresses(auctionId);
+            auctionContract = await ethers.getContractAt("NftAuction", auctionAddress);
+
+            // 设置价格喂价器
+            await auctionContract.setPriceFeed(
+                ethers.ZeroAddress,
+                await mockEthPriceFeed.getAddress()
+            );
+            await auctionContract.setPriceFeed(
+                await myERC20.getAddress(),
+                await mockMercPriceFeed.getAddress()
+            );
+        });
+
+        it("should collect ETH fees in auction contract and allow withdrawal through factory", async function () {
+            const startPrice = "0.01";
+            const bidAmount = ethers.parseEther("1.0"); // 1 ETH
+
+            // 设置拍卖
+            await myNftToken.connect(nftOwner).setApprovalForAll(auctionAddress, true);
+            await auctionFactory.connect(admin).depositNft(
+                auctionId,
+                tokenId,
+                3600,
+                nftAddress,
+                ethers.parseEther(startPrice)
+            );
+
+            // 竞价
+            await auctionContract.connect(bidder1).priceBid(0, ethers.ZeroAddress, {
+                value: bidAmount
+            });
+
+            // 记录管理员初始余额
+            const adminBalanceBefore = await ethers.provider.getBalance(admin.address);
+
+            // 结束拍卖
+            const endTx = await auctionFactory.connect(admin).endAuction(auctionId);
+            const endReceipt = await endTx.wait();
+            const endGasUsed = endReceipt.gasUsed * endReceipt.gasPrice;
+
+            // 计算预期手续费（默认 2.5%）
+            const expectedFee = ethers.parseEther("0.025"); // 2.5% of 1 ETH
+            const expectedSellerAmount = ethers.parseEther("0.975"); // 97.5% of 1 ETH
+
+            // 验证拍卖合约中有手续费
+            const auctionBalance = await ethers.provider.getBalance(auctionAddress);
+            expect(auctionBalance).to.equal(expectedFee);
+
+            // 验证卖家收到正确金额
+            const sellerBalance = await ethers.provider.getBalance(nftOwner.address);
+            expect(sellerBalance).to.be.gte(expectedSellerAmount);
+
+            // 通过工厂合约提取手续费
+            const withdrawTx = await auctionFactory.connect(admin).withdrawFeeFromAuction(auctionId);
+            const withdrawReceipt = await withdrawTx.wait();
+            const withdrawGasUsed = withdrawReceipt.gasUsed * withdrawReceipt.gasPrice;
+
+            // 验证提取后拍卖合约余额为0
+            expect(await ethers.provider.getBalance(auctionAddress)).to.equal(0);
+
+            // 验证管理员收到手续费（考虑 gas 费用）
+            const adminBalanceAfter = await ethers.provider.getBalance(admin.address);
+            expect(adminBalanceAfter).to.be.closeTo(
+                adminBalanceBefore + expectedFee - endGasUsed - withdrawGasUsed,
+                ethers.parseEther("0.05") // 允许更大误差以应对高gas费用
+            );
+        });
+
+        it("should collect ERC20 fees and allow withdrawal through factory", async function () {
+            const startPrice = "0.01";
+            const bidAmount = ethers.parseUnits("100", 18); // 100 MERC tokens
+
+            // 设置拍卖
+            await myNftToken.connect(nftOwner).setApprovalForAll(auctionAddress, true);
+            await auctionFactory.connect(admin).depositNft(
+                auctionId,
+                tokenId,
+                3600,
+                nftAddress,
+                ethers.parseEther(startPrice)
+            );
+
+            // 给竞价者 mint ERC20 代币
+            await myERC20.connect(admin)._mint(bidder1.address, bidAmount);
+            await myERC20.connect(bidder1).approve(auctionAddress, bidAmount);
+
+            // ERC20 竞价
+            await auctionContract.connect(bidder1).priceBid(bidAmount, await myERC20.getAddress());
+
+            // 结束拍卖
+            await auctionFactory.connect(admin).endAuction(auctionId);
+
+            // 计算预期手续费和卖家金额
+            const expectedFee = ethers.parseUnits("2.5", 18); // 2.5% of 100 MERC
+            const expectedSellerAmount = ethers.parseUnits("97.5", 18); // 97.5% of 100 MERC
+
+            // 验证拍卖合约中有 ERC20 手续费
+            const auctionERC20Balance = await myERC20.balanceOf(auctionAddress);
+            expect(auctionERC20Balance).to.equal(expectedFee);
+
+            // 验证卖家收到正确的 ERC20 金额
+            const sellerERC20Balance = await myERC20.balanceOf(nftOwner.address);
+            expect(sellerERC20Balance).to.equal(expectedSellerAmount);
+
+            // 记录管理员初始 ERC20 余额
+            const adminERC20BalanceBefore = await myERC20.balanceOf(admin.address);
+
+            // 通过工厂合约提取 ERC20 手续费
+            await auctionFactory.connect(admin).withdrawERC20FeeFromAuction(auctionId, await myERC20.getAddress());
+
+            // 验证提取后拍卖合约 ERC20 余额为0
+            expect(await myERC20.balanceOf(auctionAddress)).to.equal(0);
+
+            // 验证管理员收到 ERC20 手续费
+            const adminERC20BalanceAfter = await myERC20.balanceOf(admin.address);
+
+            expect(adminERC20BalanceAfter).to.equal(adminERC20BalanceBefore + expectedFee);
+        });
+
+        it("should allow batch withdrawal from multiple auctions", async function () {
+            // 创建第二个拍卖
+            await auctionFactory.connect(nftOwner).createAuction(nftOwner.address);
+            const auctionId2 = 1;
+            const auctionAddress2 = await auctionFactory.auctionAddresses(auctionId2);
+            const auctionContract2 = await ethers.getContractAt("NftAuction", auctionAddress2);
+
+            // 为第二个拍卖设置价格聚合器
+            await auctionContract2.setPriceFeed(ethers.ZeroAddress, await mockEthPriceFeed.getAddress());
+
+            // mint 第二个 NFT
+            const tx2 = await myNftToken.mint(nftOwner.address);
+            const tokenId2 = await getTokenId(tx2, myNftToken);
+
+            // 设置两个拍卖
+            const bidAmount = ethers.parseEther("0.5");
+
+            // 第一个拍卖
+            await myNftToken.connect(nftOwner).setApprovalForAll(auctionAddress, true);
+            await auctionFactory.connect(admin).depositNft(
+                auctionId,
+                tokenId,
+                3600,
+                nftAddress,
+                ethers.parseEther("0.01")
+            );
+            await auctionContract.connect(bidder1).priceBid(0, ethers.ZeroAddress, { value: bidAmount });
+            await auctionFactory.connect(admin).endAuction(auctionId);
+
+            // 第二个拍卖
+            await myNftToken.connect(nftOwner).setApprovalForAll(auctionAddress2, true);
+            await auctionFactory.connect(admin).depositNft(
+                auctionId2,
+                tokenId2,
+                3600,
+                nftAddress,
+                ethers.parseEther("0.01")
+            );
+            await auctionContract2.connect(bidder2).priceBid(0, ethers.ZeroAddress, { value: bidAmount });
+            await auctionFactory.connect(admin).endAuction(auctionId2);
+
+            // 计算预期总手续费
+            const expectedFeePerAuction = ethers.parseEther("0.0125"); // 2.5% of 0.5 ETH
+            const expectedTotalFee = expectedFeePerAuction * 2n;
+
+            // 验证两个拍卖合约都有手续费
+            expect(await ethers.provider.getBalance(auctionAddress)).to.equal(expectedFeePerAuction);
+            expect(await ethers.provider.getBalance(auctionAddress2)).to.equal(expectedFeePerAuction);
+
+            // 记录管理员初始余额
+            const adminBalanceBefore = await ethers.provider.getBalance(admin.address);
+
+            // 批量提取所有手续费
+            const withdrawTx = await auctionFactory.connect(admin).withdrawAllETHFees();
+            const withdrawReceipt = await withdrawTx.wait();
+            const gasUsed = withdrawReceipt.gasUsed * withdrawReceipt.gasPrice;
+
+            // 验证提取后两个拍卖合约余额都为0
+            expect(await ethers.provider.getBalance(auctionAddress)).to.equal(0);
+            expect(await ethers.provider.getBalance(auctionAddress2)).to.equal(0);
+
+            // 验证管理员收到总手续费
+            const adminBalanceAfter = await ethers.provider.getBalance(admin.address);
+            expect(adminBalanceAfter).to.be.closeTo(
+                adminBalanceBefore + expectedTotalFee - gasUsed,
+                ethers.parseEther("0.05")
+            );
+        });
+
+        it("should revert when non-admin tries to withdraw fees", async function () {
+            // 设置拍卖并产生手续费
+            await myNftToken.connect(nftOwner).setApprovalForAll(auctionAddress, true);
+            await auctionFactory.connect(admin).depositNft(
+                auctionId,
+                tokenId,
+                3600,
+                nftAddress,
+                ethers.parseEther("0.01")
+            );
+            await auctionContract.connect(bidder1).priceBid(0, ethers.ZeroAddress, {
+                value: ethers.parseEther("0.1")
+            });
+            await auctionFactory.connect(admin).endAuction(auctionId);
+
+            // 非管理员尝试提取手续费应该失败
+            await expect(
+                auctionFactory.connect(bidder1).withdrawFeeFromAuction(auctionId)
+            ).to.be.revertedWith("Only the administrator can perform this action.");
+
+            await expect(
+                auctionFactory.connect(bidder1).withdrawAllETHFees()
+            ).to.be.revertedWith("Only the administrator can perform this action.");
+        });
+
+        it("should revert when trying to withdraw from non-existent auction", async function () {
+            await expect(
+                auctionFactory.connect(admin).withdrawFeeFromAuction(999)
+            ).to.be.revertedWith("Auction does not exist.");
+
+            await expect(
+                auctionFactory.connect(admin).withdrawERC20FeeFromAuction(999, await myERC20.getAddress())
+            ).to.be.revertedWith("Auction does not exist.");
+        });
+
+        it("should handle withdrawal when no fees collected", async function () {
+            // 创建拍卖但不进行竞价
+            await myNftToken.connect(nftOwner).setApprovalForAll(auctionAddress, true);
+            await auctionFactory.connect(admin).depositNft(
+                auctionId,
+                tokenId,
+                3600,
+                nftAddress,
+                ethers.parseEther("0.01")
+            );
+            await auctionFactory.connect(admin).endAuction(auctionId); // 结束无竞价的拍卖
+
+            // 尝试提取手续费应该失败（没有余额）
+            await expect(
+                auctionFactory.connect(admin).withdrawFeeFromAuction(auctionId)
+            ).to.be.revertedWith("No ETH to withdraw");
+        });
+
+        it("should properly handle custom fee rates", async function () {
+            // 设置自定义手续费率 5%
+            const customFeeRate = 500; // 5%
+            await auctionFactory.connect(admin).setAuctionFeeRate(auctionId, customFeeRate);
+
+            const bidAmount = ethers.parseEther("1.0");
+
+            // 设置拍卖
+            await myNftToken.connect(nftOwner).setApprovalForAll(auctionAddress, true);
+            await auctionFactory.connect(admin).depositNft(
+                auctionId,
+                tokenId,
+                3600,
+                nftAddress,
+                ethers.parseEther("0.01")
+            );
+
+            // 竞价和结束拍卖
+            await auctionContract.connect(bidder1).priceBid(0, ethers.ZeroAddress, { value: bidAmount });
+            await auctionFactory.connect(admin).endAuction(auctionId);
+
+            // 验证自定义手续费率生效
+            const expectedFee = ethers.parseEther("0.05"); // 5% of 1 ETH
+            const auctionBalance = await ethers.provider.getBalance(auctionAddress);
+            expect(auctionBalance).to.equal(expectedFee);
+
+            // 提取并验证
+            const adminBalanceBefore = await ethers.provider.getBalance(admin.address);
+            const withdrawTx = await auctionFactory.connect(admin).withdrawFeeFromAuction(auctionId);
+            const receipt = await withdrawTx.wait();
+            const gasUsed = receipt.gasUsed * receipt.gasPrice;
+
+            const adminBalanceAfter = await ethers.provider.getBalance(admin.address);
+            expect(adminBalanceAfter).to.be.closeTo(
+                adminBalanceBefore + expectedFee - gasUsed,
+                ethers.parseEther("0.05")
+            );
         });
     });
 
@@ -450,23 +743,3 @@ describe("NFT Auction Integration Test (Factory + Auction)", () => {
         });
     });
 });
-
-async function getTokenId(tx, myNftToken) {
-    let tokenId;
-    const receipt = await tx.wait();
-    const logs = receipt.logs;
-    const iface = myNftToken.interface;
-
-    for (const log of logs) {
-        try {
-            const parsed = iface.parseLog(log);
-            if (parsed.name === "Minted") {
-                tokenId = parsed.args.tokenId;
-                break;
-            }
-        } catch (e) {
-            continue;
-        }
-    }
-    return tokenId;
-}

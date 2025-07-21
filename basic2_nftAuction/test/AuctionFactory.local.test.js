@@ -4,6 +4,7 @@ const {
 } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 const { deployments, ethers, upgrades } = require("hardhat");
 const { expect } = require("chai");
+const { getTokenId } = require("./helpers/testHelpers");
 
 describe("AuctionFactory Test", () => {
 
@@ -102,6 +103,29 @@ describe("AuctionFactory Test", () => {
         expect(await auctionContract.tokenId()).to.equal(tokenId);
     });
 
+    it("should be able to set fee rate", async () => {
+        const auction1 = await createAuction(nftOwner.address);
+        const newFeeRate = 300; // 3%
+        await auctionFactory.connect(deployer).setAuctionFeeRate(auction1.auctionId, newFeeRate);
+        expect(
+            await auctionFactory.getAuctionFeeRate(auction1.auctionId)
+        ).to.equal(newFeeRate);
+
+        const auction2 = await createAuction(nftOwner.address);
+        const newFeeRate2 = 400; // 4%
+        await auctionFactory.connect(deployer).setGlobalFeeRate(newFeeRate2);
+        expect(
+            await auctionFactory.getAuctionFeeRate(auction2.auctionId)
+        ).to.equal(newFeeRate2);
+        expect(
+            await auctionFactory.getAuctionFeeRate(auction1.auctionId)
+        ).to.equal(newFeeRate2);
+
+        await expect(
+            auctionFactory.connect(deployer).setAuctionFeeRate(auction2.auctionId + BigInt(100), 500)
+        ).to.be.revertedWith("Auction does not exist.");
+    });
+
     it("should be able to end an auction", async () => {
         const { auctionId, auctionAddress } = await createAuction(nftOwner.address);
 
@@ -153,27 +177,3 @@ describe("AuctionFactory Test", () => {
         });
     });
 });
-
-async function getTokenId(tx, myNftToken) {
-    let tokenId;
-    const receipt = await tx.wait();
-    // console.log("Minted NFT transaction receipt:", receipt);
-    const logs = receipt.logs;
-    const iface = myNftToken.interface;
-
-    for (const log of logs) {
-        try {
-            const parsed = iface.parseLog(log);
-            if (parsed.name === "Minted") {
-                tokenId = parsed.args.tokenId;
-                break;
-            }
-        } catch (e) {
-            // 不是本合约的日志，忽略
-            console.log("❌ Ignored log:", log);
-            continue;
-        }
-    }
-    console.log("Minted tokenId:", tokenId.toString());
-    return tokenId;
-}
