@@ -35,7 +35,11 @@ contract NftAuction is Initializable, ERC721Holder {
     event FeeCollected(address indexed tokenAddress, uint256 feeAmount, address indexed collector);
     event AuctionCompleted(address indexed winner, uint256 amount, uint256 fee);
 
-    function initialize(address _seller) public initializer {
+    function initialize(address _seller) public virtual initializer {
+        __NftAuction_init(_seller);
+    }
+
+    function __NftAuction_init(address _seller) internal onlyInitializing {
         admin = msg.sender;  // 初始化时，调用者（工厂合约）是管理员
         seller = _seller;    // 同时设置卖家
         feeRate = 250;       // 默认手续费率 2.5% (250 basis points)
@@ -45,12 +49,16 @@ contract NftAuction is Initializable, ERC721Holder {
         return "1.0.0";
     }
 
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Only the administrator can perform this action.");
+        _;
+    }
+
     /**
      * @dev 设置手续费率
      * @param _feeRate 手续费率（基点，10000 = 100%）
      */
-    function setFeeRate(uint256 _feeRate) external {
-        require(msg.sender == admin, "Only admin can set fee rate");
+    function setFeeRate(uint256 _feeRate) external onlyAdmin {
         require(_feeRate <= 1000, "Fee rate cannot exceed 10%"); // 最大10%
         feeRate = _feeRate;
     }
@@ -66,8 +74,7 @@ contract NftAuction is Initializable, ERC721Holder {
      * @dev 提取合约中的ETH余额（仅管理员）
      * @param _to 接收ETH的地址
      */
-    function withdrawETH(address _to) external {
-        require(msg.sender == admin, "Only admin can withdraw");
+    function withdrawETH(address _to) external onlyAdmin {
         require(_to != address(0), "Invalid recipient address");
         uint256 balance = address(this).balance;
         require(balance > 0, "No ETH to withdraw");
@@ -79,8 +86,7 @@ contract NftAuction is Initializable, ERC721Holder {
      * @param _tokenAddress ERC20代币地址
      * @param _to 接收代币的地址
      */
-    function withdrawERC20(address _tokenAddress, address _to) external {
-        require(msg.sender == admin, "Only admin can withdraw");
+    function withdrawERC20(address _tokenAddress, address _to) external onlyAdmin {
         require(_to != address(0), "Invalid recipient address");
         IERC20 token = IERC20(_tokenAddress);
         uint256 balance = token.balanceOf(address(this));
@@ -100,8 +106,7 @@ contract NftAuction is Initializable, ERC721Holder {
         uint256 _duration,
         address _nftAddress,
         uint256 _startPrice
-    ) external {
-        require(msg.sender == admin, "Only admin can deposit NFT.");
+    ) external onlyAdmin {
         require(!deposited, "NFT already deposited");
         require(_nftAddress != address(0), "NFT address cannot be 0.");
 
