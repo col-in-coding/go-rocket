@@ -106,7 +106,7 @@ contract NftAuction is Initializable, ERC721Holder {
         uint256 _duration,
         address _nftAddress,
         uint256 _startPrice
-    ) external onlyAdmin {
+    ) public virtual onlyAdmin {
         require(!deposited, "NFT already deposited");
         require(_nftAddress != address(0), "NFT address cannot be 0.");
 

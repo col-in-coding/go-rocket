@@ -1,6 +1,7 @@
-const {loadFixture} = require("@nomicfoundation/hardhat-network-helpers");
-const {ethers} = require("hardhat");
+const { loadFixture } = require("@nomicfoundation/hardhat-network-helpers");
+const { ethers } = require("hardhat");
 const { getTokenId } = require("./helpers/testHelpers");
+const { expect } = require("chai");
 
 
 describe("CCIP Test", function () {
@@ -51,33 +52,28 @@ describe("CCIP Test", function () {
         tokenId = await getTokenId(tx, myNftToken);
         nftAddress = await myNftToken.getAddress();
 
-        return {
-            ccipLocalSimulator,
-            ccipNftAuction,
-            ccipBidProxy,
-            myNftToken,
-            chainSelector_,
-            sourceRouter_,
-            destinationRouter_,
-            tokenId,
-            nftAddress
-        };
+    }
+
+    async function deployMockAggregator() {
+        const initialEth2Usd = ethers.parseUnits("2000", 8);
+        mockEthPriceFeed = await ethers.deployContract("MockAggregator", [initialEth2Usd]);
+        await mockEthPriceFeed.waitForDeployment();
+
+        await ccipNftAuction.setPriceFeed(
+            ethers.ZeroAddress,
+            await mockEthPriceFeed.getAddress()
+        );
     }
 
     beforeEach(async function () {
-        const fixtures = await loadFixture(deployCCIPFixture);
-        ccipLocalSimulator = fixtures.ccipLocalSimulator;
-        ccipNftAuction = fixtures.ccipNftAuction;
-        ccipBidProxy = fixtures.ccipBidProxy;
-        myNftToken = fixtures.myNftToken;
-        chainSelector_ = fixtures.chainSelector_;
-        sourceRouter_ = fixtures.sourceRouter_;
-        destinationRouter_ = fixtures.destinationRouter_;
-        tokenId = fixtures.tokenId;
-        nftAddress = fixtures.nftAddress;
+        await loadFixture(deployCCIPFixture);
+        await loadFixture(deployMockAggregator);
     });
 
-    it("send and receive cross-chain message", async function () {
+    it("should be able to send and receive auction info message", async function () {
+
+        const startPrice = ethers.parseEther("0.01");
+        const bidAmount = ethers.parseEther("1.0");
 
         // NFT owner needs to approve the auction contract and call depositNft
         await myNftToken.connect(nftOwner).setApprovalForAll(await ccipNftAuction.getAddress(), true);
@@ -85,14 +81,55 @@ describe("CCIP Test", function () {
             tokenId,
             3600,
             nftAddress,
-            ethers.parseEther("1")
+            startPrice
         );
 
-        // broadcast auction item to registered chains
-        await ccipNftAuction._broadcastAuctionItem(chainId1);
+        // 等待一段时间让跨链消息传递
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // wait for the message to be received
+        compareStates(ccipNftAuction, ccipBidProxy);
 
+        await ccipNftAuction.connect(bidder1).priceBid(0, ethers.ZeroAddress, {
+            value: bidAmount
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        compareStates(ccipNftAuction, ccipBidProxy);
+
+        console.log("✅ Auction state synchronized successfully!");
     });
 
+
+    it("should be able to bid from side chain", async function () {
+
+    });
 });
+
+async function compareStates(ccipNftAuction, ccipBidProxy) {
+    const auctionState = await ccipBidProxy.auction();
+    const expectedState = {
+        seller: await ccipNftAuction.seller(),
+        currentHighestBidder: await ccipNftAuction.highestBidder(),
+        nftAddress: await ccipNftAuction.nftAddress(),
+        tokenAddress: await ccipNftAuction.tokenAddress(),
+        startPrice: await ccipNftAuction.startPrice(),
+        startTime: await ccipNftAuction.startTime(),
+        endTime: await ccipNftAuction.startTime() + await ccipNftAuction.duration(),
+        tokenId: await ccipNftAuction.tokenId(),
+        currentHighestBid: await ccipNftAuction.highestBid(),
+        feeRate: 250n, // 默认费率
+        deposited: await ccipNftAuction.deposited(),
+        ended: await ccipNftAuction.ended()
+    };
+    expect(auctionState.seller).to.equal(expectedState.seller);
+    expect(auctionState.currentHighestBidder).to.equal(expectedState.currentHighestBidder);
+    expect(auctionState.nftAddress).to.equal(expectedState.nftAddress);
+    expect(auctionState.tokenAddress).to.equal(expectedState.tokenAddress);
+    expect(auctionState.startPrice).to.equal(expectedState.startPrice);
+    expect(auctionState.startTime).to.equal(expectedState.startTime);
+    expect(auctionState.endTime).to.equal(expectedState.endTime);
+    expect(auctionState.tokenId).to.equal(expectedState.tokenId);
+    expect(auctionState.currentHighestBid).to.equal(expectedState.currentHighestBid);
+    expect(auctionState.deposited).to.equal(expectedState.deposited);
+    expect(auctionState.ended).to.equal(expectedState.ended);
+}
