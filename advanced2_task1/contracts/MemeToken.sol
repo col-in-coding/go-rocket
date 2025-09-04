@@ -6,40 +6,8 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "hardhat/console.sol";
-
-interface IUniswapV2Router {
-    function factory() external pure returns (address);
-    function WETH() external pure returns (address);
-    function addLiquidityETH(
-        address token,
-        uint256 tokenAmount,
-        uint256 minTokenAmount,
-        uint256 minETHAmount,
-        address to,
-        uint256 deadline
-    ) external payable returns (uint256 amountToken, uint256 amountETH, uint256 liquidity);
-
-    function removeLiquidityETH(
-        address token,
-        uint256 liquidity,
-        uint256 amountTokenMin,
-        uint256 amountETHMin,
-        address to,
-        uint256 deadline
-    ) external returns (uint256 amountToken, uint256 amountETH);
-
-    function swapExactTokensForETHSupportingFeeOnTransferTokens(
-        uint amountIn,
-        uint amountOutMin,
-        address[] calldata path,
-        address to,
-        uint deadline
-    ) external;
-}
-
-interface IUniswapV2Factory {
-    function createPair(address tokenA, address tokenB) external returns (address pair);
-}
+import { IUniswapV2Router } from "./interfaces/IUniswapV2Router.sol";
+import { IUniswapV2Factory } from "./interfaces/IUniswapV2Factory.sol";
 
 contract MemeToken is ERC20, Ownable, ReentrancyGuard {
 
@@ -52,13 +20,6 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
     uint256 private constant MIN_TOKENS_BEFORE_SWAP = 5000 * 10 ** 18;
 
     bool public liquidityAdded;
-
-    bool private inSwap;
-    modifier lockTheSwap {
-        inSwap = true;
-        _;
-        inSwap = false;
-    }
 
     mapping(address => bool) public isExcludedFromTax;
 
@@ -125,6 +86,10 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         payable
         nonReentrant
     {
+        require(liquidityAdded, "Initial liquidity not added yet");
+        require(tokenAmount > 0, "Invalid token amount");
+        require(msg.value > 0, "Invalid ETH amount");
+
         // 将用户的代币转移到合约
         _transfer(msg.sender, address(this), tokenAmount);
 
@@ -188,8 +153,7 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         bool shouldTakeTax = !isExcludedFromTax[sender] && !isExcludedFromTax[recipient] &&
                             (sender == uniswapPair || recipient == uniswapPair);
 
-        // 防递归
-        if (shouldTakeTax && !inSwap) {
+        if (shouldTakeTax) {
             taxAmount = (amount * TAX_PERCENT) / TAX_DENOMINATOR;
         }
 
@@ -199,7 +163,7 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
             _transfer(sender, address(this), taxAmount);
 
             uint256 contractTokenBalance = balanceOf(address(this));
-            bool canProcessTax = contractTokenBalance >= MIN_TOKENS_BEFORE_SWAP && sender != uniswapPair && !inSwap;
+            bool canProcessTax = contractTokenBalance >= MIN_TOKENS_BEFORE_SWAP && sender != uniswapPair;
 
             if (canProcessTax) {
                 _processTax(contractTokenBalance);
@@ -207,7 +171,7 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         }
     }
 
-    function _processTax(uint256 tokenAmount) private lockTheSwap{
+    function _processTax(uint256 tokenAmount) private {
 
         uint256 half = tokenAmount / 2;
         uint256 otherHalf = tokenAmount - half;
@@ -262,10 +226,9 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         );
     }
 
-    function processTaxManual() external onlyOwner {
+    function processTaxManual() external onlyOwner nonReentrant {
         uint256 contractTokenBalance = balanceOf(address(this));
         require(contractTokenBalance > 0, "No taxes to process");
-        require(!inSwap, "Already processing");
 
         _processTax(contractTokenBalance);
     }
