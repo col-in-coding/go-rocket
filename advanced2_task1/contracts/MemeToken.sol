@@ -26,6 +26,9 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
     uint256 public slippagePercent = 5;
     uint256 public slippageThreshold = 10000 * 10 ** 18; // 10000 tokens以上才启用滑点保护
 
+    // Transfer Limit
+    uint256 public maxTxAmount = 20000 * 10 ** 18; // 最大交易量20,000代币
+
     event TaxProcessed(uint256 tokenSwapped, uint256 ethReceived);
     event LiquidityAdded(uint256 tokensAmount, uint256 ethAmount, uint256 liquidity);
 
@@ -140,6 +143,10 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         require(sender != address(0), "ERC20: transfer from the zero address");
         require(recipient != address(0), "ERC20: transfer to the zero address");
         require(amount > 0, "Transfer amount must be greater than zero");
+        // 交易限制检查
+        if (sender != owner() && recipient != owner()) {
+            require(amount <= maxTxAmount, "Transfer amount exceeds the maxTxAmount");
+        }
 
         // 如果流动性还没有添加，就直接转账（避免在添加流动性时收税）
         if (!liquidityAdded) {

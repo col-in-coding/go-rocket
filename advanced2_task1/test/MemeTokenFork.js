@@ -478,5 +478,90 @@ describe("MemeToken on Sepolia Fork", function () {
                 ).to.not.be.reverted;
             });
         });
+
+        describe("Transaction Limits", function () {
+            it("Should enforce max transaction amount for regular transfers", async function () {
+                const maxTxAmount = ethers.parseUnits("20000", 18);
+                const exceedingAmount = ethers.parseUnits("25000", 18);
+
+                // Transfer tokens to addr1 for testing
+                await memeToken.transfer(addr1.address, exceedingAmount);
+
+                // Try to transfer more than max tx amount
+                await expect(
+                    memeToken.connect(addr1).transfer(addr2.address, exceedingAmount)
+                ).to.be.revertedWith("Transfer amount exceeds the maxTxAmount");
+            });
+
+            it("Should allow transfers up to max transaction amount", async function () {
+                const maxTxAmount = ethers.parseUnits("20000", 18);
+
+                // Transfer tokens to addr1 for testing
+                await memeToken.transfer(addr1.address, maxTxAmount);
+
+                // Transfer exactly the max amount should work
+                await expect(
+                    memeToken.connect(addr1).transfer(addr2.address, maxTxAmount)
+                ).to.not.be.reverted;
+
+                expect(await memeToken.balanceOf(addr2.address)).to.be.gt(0);
+            });
+
+            it("Should allow owner to bypass transaction limits", async function () {
+                const exceedingAmount = ethers.parseUnits("25000", 18);
+
+                // Owner can transfer more than max tx amount
+                await expect(
+                    memeToken.transfer(addr1.address, exceedingAmount)
+                ).to.not.be.reverted;
+
+                expect(await memeToken.balanceOf(addr1.address)).to.equal(exceedingAmount);
+            });
+
+            it("Should allow transfers to owner to bypass transaction limits", async function () {
+                const exceedingAmount = ethers.parseUnits("25000", 18);
+
+                // Transfer to addr1 first
+                await memeToken.transfer(addr1.address, exceedingAmount);
+
+                // addr1 can transfer more than max amount back to owner
+                await expect(
+                    memeToken.connect(addr1).transfer(owner.address, exceedingAmount)
+                ).to.not.be.reverted;
+            });
+
+            it("Should enforce limits on transferFrom", async function () {
+                const exceedingAmount = ethers.parseUnits("25000", 18);
+
+                // Transfer tokens to addr1 and approve addr2
+                await memeToken.transfer(addr1.address, exceedingAmount);
+                await memeToken.connect(addr1).approve(addr2.address, exceedingAmount);
+
+                // addr2 tries to transferFrom more than max amount
+                await expect(
+                    memeToken.connect(addr2).transferFrom(addr1.address, addr2.address, exceedingAmount)
+                ).to.be.revertedWith("Transfer amount exceeds the maxTxAmount");
+            });
+
+            it("Should not enforce limits before liquidity is added", async function () {
+                // Deploy a new token without initial liquidity
+                const MemeToken = await ethers.getContractFactory("MemeToken");
+                const newToken = await MemeToken.deploy(UNISWAP_ROUTER_SEPOLIA);
+
+                const exceedingAmount = ethers.parseUnits("25000", 18);
+
+                // Should allow large transfers before liquidity is added
+                await expect(
+                    newToken.transfer(addr1.address, exceedingAmount)
+                ).to.not.be.reverted;
+
+                expect(await newToken.balanceOf(addr1.address)).to.equal(exceedingAmount);
+            });
+
+            it("Should get correct maxTxAmount value", async function () {
+                const expectedMaxTx = ethers.parseUnits("20000", 18);
+                expect(await memeToken.maxTxAmount()).to.equal(expectedMaxTx);
+            });
+        });
     });
 });
