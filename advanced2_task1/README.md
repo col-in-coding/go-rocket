@@ -68,3 +68,15 @@ X，Y 分别为两种代币的数量，K为恒定乘积，也代表流动性。
 代币税功能：实现交易税机制，对每笔代币交易征收一定比例的税费，并将税费分配给特定的地址或用于特定的用途。
 流动性池集成：设计并实现与流动性池的交互功能，支持用户向流动性池添加和移除流动性。
 交易限制功能：设置合理的交易限制，如单笔交易最大额度、每日交易次数限制等，防止恶意操纵市场。
+
+## 5. Sepolia Testnet
+
+#### 1. Deploy Contract
+Uniswap Router: `0xeE567Fe1712Faf6149d80dA1E6934E354124CfE3` \
+Contract Deployed At: `0x7779e6f2FC6f720bfb44b0bc3e035364488f0F79` \
+Uniswap Pair Created At: `0x210e11c8B47bE3584fC92e45639b7a14f21BDD27`
+
+#### 2. Add InitialLiquidity
+value: 1000000000000000000 \
+tokenAmount: 1000000000000000000
+lp aquired: 0.9999999...

@@ -5,7 +5,6 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "hardhat/console.sol";
 import { IUniswapV2Router } from "./interfaces/IUniswapV2Router.sol";
 import { IUniswapV2Factory } from "./interfaces/IUniswapV2Factory.sol";
 
@@ -57,8 +56,6 @@ contract MemeToken is ERC20, Ownable, ReentrancyGuard {
         onlyOwner
         nonReentrant
     {
-        console.log(msg.value);
-        console.log(ethAmount);
         require(!liquidityAdded, "Liquidity already added");
         require(msg.value == ethAmount, "ETH amount mismatch");
         require(tokenAmount > 0 && ethAmount > 0, "Amounts must be greater than 0");
